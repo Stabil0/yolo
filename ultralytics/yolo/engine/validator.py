@@ -19,6 +19,7 @@ Usage - formats:
                           yolov8n_paddle_model       # PaddlePaddle
 """
 import json
+import re
 from collections import defaultdict
 from pathlib import Path
 
@@ -87,6 +88,25 @@ class BaseValidator:
 
         self.callbacks = defaultdict(list, callbacks.default_callbacks)  # add callbacks
 
+    @staticmethod
+    def find_num_channels(string: str) -> int:
+        """
+        Find the number of channels that should be used from a pytorch runtime error.
+        """
+        # define regular expression pattern to match 'to have * channels'
+        pattern = r'to have (\d+) channels'
+
+        # search for pattern in string using regular expressions
+        match = re.search(pattern, string)
+
+        # if match is found, return the number of channels as an integer
+        if match:
+            return int(match.group(1))
+
+        # if no match is found, raise an error
+        else:
+            return RuntimeError('Unable to find number of channels from error string.')
+
     @smart_inference_mode()
     def __call__(self, trainer=None, model=None):
         """
@@ -136,7 +156,11 @@ class BaseValidator:
             self.dataloader = self.dataloader or self.get_dataloader(self.data.get(self.args.split), self.args.batch)
 
             model.eval()
-            model.warmup(imgsz=(1 if pt else self.args.batch, 3, imgsz, imgsz))  # warmup
+            try:
+                model.warmup(imgsz=(1 if pt else self.args.batch, 3, imgsz, imgsz))  # warmup
+            except RuntimeError as err:
+                num_channels = self.find_num_channels(err.args[0])
+                model.warmup(imgsz=(self.args.batch, num_channels, imgsz, imgsz))  # warmup
 
         dt = Profile(), Profile(), Profile(), Profile()
         n_batches = len(self.dataloader)
